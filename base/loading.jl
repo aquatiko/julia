@@ -368,9 +368,9 @@ function project_file_name_uuid(project_file::String, name::String)::PkgId
         uuid = dummy_uuid(project_file)
         for line in eachline(io)
             occursin(re_section, line) && break
-            if (m = match(re_name_to_string, line)) != nothing
+            if (m = match(re_name_to_string, line)) !== nothing
                 name = String(m.captures[1])
-            elseif (m = match(re_uuid_to_string, line)) != nothing
+            elseif (m = match(re_uuid_to_string, line)) !== nothing
                 uuid = UUID(m.captures[1])
             end
         end
@@ -383,7 +383,7 @@ function project_file_path(project_file::String, name::String)::String
     path = open(project_file) do io
         for line in eachline(io)
             occursin(re_section, line) && break
-            if (m = match(re_path_to_string, line)) != nothing
+            if (m = match(re_path_to_string, line)) !== nothing
                 return String(m.captures[1])
             end
         end
@@ -399,7 +399,7 @@ function project_file_manifest_path(project_file::String)::Union{Nothing,String}
         dir = abspath(dirname(project_file))
         for line in eachline(io)
             occursin(re_section, line) && break
-            if (m = match(re_manifest_to_string, line)) != nothing
+            if (m = match(re_manifest_to_string, line)) !== nothing
                 manifest_file = normpath(joinpath(dir, m.captures[1]))
                 isfile_casesensitive(manifest_file) && return manifest_file
                 return nothing # silently stop if the explicitly listed manifest file is not present
@@ -419,11 +419,11 @@ function manifest_file_name_uuid(manifest_file::IO, name::String)::Union{Nothing
     name_section = false
     uuid = nothing
     for line in eachline(manifest_file)
-        if (m = match(re_section_capture, line)) != nothing
+        if (m = match(re_section_capture, line)) !== nothing
             name_section && break
             name_section = (m.captures[1] == name)
         elseif name_section
-            if (m = match(re_uuid_to_string, line)) != nothing
+            if (m = match(re_uuid_to_string, line)) !== nothing
                 uuid = UUID(m.captures[1])
             end
         end
@@ -433,6 +433,7 @@ end
 
 # given a project directory (implicit env from LOAD_PATH) and a name,
 # find an entry point for `name`, and see if it has an associated project file
+# TODO: aren't we supposed to first check for the Project file first and see if it declares a path?
 function entry_point_and_project_file(dir::String, name::String)::Union{Tuple{Nothing,Nothing},Tuple{String,Nothing},Tuple{String,String}}
     for entry in ("", name, "$name.jl")
         path = isempty(entry) ? joinpath(dir, "$name.jl") : joinpath(dir, entry, "src", "$name.jl")
@@ -487,13 +488,13 @@ function explicit_project_deps_get(project_file::String, name::String)::Union{No
                 state == :top && root_name == name && return root_uuid
                 state = occursin(re_section_deps, line) ? :deps : :other
             elseif state == :top
-                if (m = match(re_name_to_string, line)) != nothing
+                if (m = match(re_name_to_string, line)) !== nothing
                     root_name = String(m.captures[1])
-                elseif (m = match(re_uuid_to_string, line)) != nothing
+                elseif (m = match(re_uuid_to_string, line)) !== nothing
                     root_uuid = UUID(m.captures[1])
                 end
             elseif state == :deps
-                if (m = match(re_key_to_string, line)) != nothing
+                if (m = match(re_key_to_string, line)) !== nothing
                     m.captures[1] == name && return UUID(m.captures[2])
                 end
             end
@@ -511,15 +512,16 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
     found_or_uuid = open(manifest_file) do io
         uuid = deps = nothing
         state = :other
+        # first search the manifest for the deps section associated with `where` (by uuid)
         for line in eachline(io)
             if occursin(re_array_of_tables, line)
                 uuid == where && break
                 uuid = deps = nothing
                 state = :stanza
             elseif state == :stanza
-                if (m = match(re_uuid_to_string, line)) != nothing
+                if (m = match(re_uuid_to_string, line)) !== nothing
                     uuid = UUID(m.captures[1])
-                elseif (m = match(re_deps_to_any, line)) != nothing
+                elseif (m = match(re_deps_to_any, line)) !== nothing
                     deps = String(m.captures[1])
                 elseif occursin(re_subsection_deps, line)
                     state = :deps
@@ -527,11 +529,13 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
                     state = :other
                 end
             elseif state == :deps && uuid == where
-                if (m = match(re_key_to_string, line)) != nothing
+                # [deps] section format gives both name and uuid
+                if (m = match(re_key_to_string, line)) !== nothing
                     m.captures[1] == name && return UUID(m.captures[2])
                 end
             end
         end
+        # now search through `deps = []` string to see if we have an entry for `name`
         uuid == where || return false
         deps === nothing && return true
         # TODO: handle inline table syntax
@@ -541,6 +545,7 @@ function explicit_manifest_deps_get(project_file::String, where::UUID, name::Str
         end
         occursin(repr(name), deps) || return true
         seekstart(io) # rewind IO handle
+        # finally, find out the `uuid` associated with `name`
         return something(manifest_file_name_uuid(io, name), false)
     end
     found_or_uuid isa UUID && return PkgId(found_or_uuid, name)
@@ -555,15 +560,15 @@ function explicit_manifest_uuid_path(project_file::String, pkg::PkgId)::Union{No
     open(manifest_file) do io
         uuid = name = path = hash = nothing
         for line in eachline(io)
-            if (m = match(re_section_capture, line)) != nothing
+            if (m = match(re_section_capture, line)) !== nothing
                 uuid == pkg.uuid && break
                 name = String(m.captures[1])
                 path = hash = nothing
-            elseif (m = match(re_uuid_to_string, line)) != nothing
+            elseif (m = match(re_uuid_to_string, line)) !== nothing
                 uuid = UUID(m.captures[1])
-            elseif (m = match(re_path_to_string, line)) != nothing
+            elseif (m = match(re_path_to_string, line)) !== nothing
                 path = String(m.captures[1])
-            elseif (m = match(re_hash_to_string, line)) != nothing
+            elseif (m = match(re_hash_to_string, line)) !== nothing
                 hash = SHA1(m.captures[1])
             end
         end
